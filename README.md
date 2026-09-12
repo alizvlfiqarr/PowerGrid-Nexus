@@ -1,6 +1,6 @@
 # PowerGrid-Nexus
 
-A lightweight **Power Plant Simulator** built entirely with HTML, JavaScript, and powered by [Neutralinojs](https://neutralino.js.org/).
+A lightweight **Power Plant Simulator** built entirely using HTML, JavaScript, and powered by [Neutralinojs].
 
 ---
 
