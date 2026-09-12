@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PowerGrid Nexus: Energy & Power Plant Simulator</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 850: '#111827', 900: '#0f172a', 950: '#020617' },
+                        cyber: { blue: '#0284c7', green: '#10b981', amber: '#f59e0b', red: '#ef4444', purple: '#8b5cf6' }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #020617; color: #f8fafc; user-select: none; }
+        .font-mono-num { font-family: 'JetBrains Mono', monospace; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        .plant-card { transition: box-shadow 0.2s ease-in-out; }
+
+        /* Money counter */
+        .money-wrap { position: relative; }
+        .money-pulse { animation: moneyPulse 0.35s ease-out; }
+        @keyframes moneyPulse {
+            0% { transform: scale(1.06); }
+            100% { transform: scale(1); }
+        }
+        .float-gain {
+            position: absolute;
+            left: 50%;
+            top: -4px;
+            transform: translateX(-50%);
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            font-size: 0.7rem;
+            white-space: nowrap;
+            pointer-events: none;
+            animation: floatUp 1.6s ease-out forwards;
+        }
+        @keyframes floatUp {
+            0% { opacity: 0; transform: translate(-50%, 6px); }
+            15% { opacity: 1; }
+            100% { opacity: 0; transform: translate(-50%, -34px); }
+        }
+
+        /* Toast */
+        #toast-stack { position: fixed; top: 14px; right: 14px; z-index: 100; display: flex; flex-direction: column; gap: 8px; width: 260px; }
+        .toast { animation: toastIn 0.25s ease-out; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+        .earn-card { transition: opacity 0.2s ease; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-950 text-slate-100 overflow-x-hidden">
+
+    <div id="toast-stack"></div>
+
+    <!-- HEADER -->
+    <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-50 shadow-md">
+        <div class="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
+
+            <!-- Logo -->
+            <div class="flex items-center space-x-2">
+                <div class="w-9 h-9 rounded-lg bg-sky-600 flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-sky-500/30">
+                    <i class="fa-solid fa-bolt"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-base leading-tight tracking-tight text-white">PowerGrid <span class="text-sky-400 font-mono">NEXUS</span></h1>
+                    <p class="text-[11px] text-slate-400 font-mono" id="sim-clock">Day 1, 00:00</p>
+                </div>
+            </div>
+
+            <!-- Money Counter (hero element) -->
+            <div class="money-wrap flex flex-col items-center px-4">
+                <span class="text-[10px] uppercase tracking-wide text-slate-500">Treasury</span>
+                <span id="metric-funds" class="text-2xl sm:text-3xl font-extrabold font-mono-num text-emerald-400 leading-none">$12.50M</span>
+                <span id="income-rate" class="text-[11px] font-mono text-slate-400 mt-0.5">+$0 / hr</span>
+            </div>
+
+            <!-- Controls -->
+            <div class="flex items-center space-x-2">
+                <button id="btn-play-pause" class="px-3 py-1.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white font-medium text-xs flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-pause" id="play-icon"></i>
+                    <span id="play-text">Pause</span>
+                </button>
+                <select id="sim-speed" class="bg-slate-800 text-slate-200 text-xs rounded-md border border-slate-700 px-2 py-1.5 font-mono cursor-pointer focus:outline-none focus:border-sky-500">
+                    <option value="1">1x</option>
+                    <option value="2" selected>2x</option>
+                    <option value="5">5x</option>
+                    <option value="10">10x</option>
+                    <option value="25">25x</option>
+                </select>
+                <button id="btn-save-quit" class="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs flex items-center gap-1.5 transition border border-slate-700">
+                    <i class="fa-solid fa-floppy-disk"></i> Save & Quit
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- SAVE / RESUME OVERLAY -->
+    <div id="save-overlay" class="hidden fixed inset-0 z-[200] bg-slate-950/90 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full text-center space-y-4">
+            <i class="fa-solid fa-floppy-disk text-emerald-400 text-3xl"></i>
+            <h2 class="text-lg font-bold text-white">Game Saved</h2>
+            <p class="text-sm text-slate-400">Your progress is saved on this device. It's safe to close this tab now, or resume below.</p>
+            <button id="btn-resume-game" class="w-full py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-sm transition">
+                Resume Playing
+            </button>
+        </div>
+    </div>
+
+    <!-- CONTINUE SAVE PROMPT (shown on load if a save exists) -->
+    <div id="continue-overlay" class="hidden fixed inset-0 z-[200] bg-slate-950/90 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full text-center space-y-4">
+            <i class="fa-solid fa-bolt text-sky-400 text-3xl"></i>
+            <h2 class="text-lg font-bold text-white">Saved Game Found</h2>
+            <p class="text-sm text-slate-400" id="continue-summary">Continue where you left off?</p>
+            <div class="flex gap-2">
+                <button id="btn-continue-yes" class="flex-1 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-sm transition">Continue</button>
+                <button id="btn-continue-no" class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-sm transition">New Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NAV -->
+    <nav class="bg-slate-900/80 border-b border-slate-800/80 px-4">
+        <div class="max-w-6xl mx-auto flex space-x-1 sm:space-x-4 overflow-x-auto text-xs sm:text-sm">
+            <button data-tab="tab-control-room" class="nav-tab active px-4 py-3 font-medium text-sky-400 border-b-2 border-sky-400 flex items-center gap-2 whitespace-nowrap">
+                <i class="fa-solid fa-sliders"></i> Control Room
+            </button>
+            <button data-tab="tab-market" class="nav-tab px-4 py-3 font-medium text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center gap-2 whitespace-nowrap">
+                <i class="fa-solid fa-industry"></i> Build Market
+            </button>
+            <button data-tab="tab-manual" class="nav-tab px-4 py-3 font-medium text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center gap-2 whitespace-nowrap">
+                <i class="fa-solid fa-book-bookmark"></i> Guide
+            </button>
+        </div>
+    </nav>
+
+    <!-- ALERT BANNER -->
+    <div id="alert-banner" class="hidden bg-rose-900/80 border-b border-rose-500 text-rose-100 px-4 py-2 text-xs sm:text-sm font-medium flex items-center justify-between">
+        <div class="flex items-center space-x-2 max-w-6xl mx-auto w-full">
+            <i class="fa-solid fa-triangle-exclamation text-rose-400 text-lg animate-pulse"></i>
+            <span id="alert-message">WARNING</span>
+        </div>
+        <button onclick="document.getElementById('alert-banner').classList.add('hidden')" class="text-rose-300 hover:text-white">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>
+
+    <!-- MAIN -->
+    <main class="flex-1 max-w-6xl w-full mx-auto p-3 sm:p-6 space-y-6">
+
+        <!-- TAB 1: CONTROL ROOM -->
+        <div id="tab-control-room" class="tab-content space-y-6">
+
+            <!-- Simplified grid status strip -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex flex-col">
+                    <span class="text-slate-400">Demand</span>
+                    <span class="text-base font-bold font-mono-num text-amber-400" id="metric-demand">0 MW</span>
+                </div>
+                <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex flex-col">
+                    <span class="text-slate-400">Generation</span>
+                    <span class="text-base font-bold font-mono-num text-emerald-400" id="metric-generation">0 MW</span>
+                </div>
+                <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex flex-col" id="freq-card">
+                    <span class="text-slate-400">Grid Status</span>
+                    <span class="text-base font-bold font-mono-num text-emerald-400" id="metric-frequency">60.00 Hz</span>
+                </div>
+                <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex flex-col">
+                    <span class="text-slate-400">CO2 Rate</span>
+                    <span class="text-base font-bold font-mono-num text-rose-400" id="metric-co2">0 t/h</span>
+                </div>
+            </div>
+
+            <!-- Telemetry chart -->
+            <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 shadow-xl">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-chart-area text-sky-400"></i> Load vs Supply
+                    </h2>
+                    <div class="flex items-center space-x-4 text-xs font-mono">
+                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span> Demand</span>
+                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"></span> Supply</span>
+                    </div>
+                </div>
+                <div class="relative h-40 w-full">
+                    <canvas id="canvas-dispatch-chart" class="w-full h-full block"></canvas>
+                </div>
+            </div>
+
+            <!-- WAYS TO EARN MONEY -->
+            <div class="space-y-3">
+                <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                    <i class="fa-solid fa-sack-dollar text-emerald-400"></i> Ways to Earn
+                </h2>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3" id="earn-panel">
+
+                    <!-- Contract card (dynamic) -->
+                    <div id="earn-contract" class="earn-card bg-slate-900 rounded-xl p-4 border border-slate-800 flex flex-col justify-between space-y-2">
+                        <div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-bold text-slate-200 flex items-center gap-1.5"><i class="fa-solid fa-file-signature text-sky-400"></i> Grid Contract</span>
+                                <span id="contract-timer" class="text-[10px] font-mono text-slate-500"></span>
+                            </div>
+                            <p id="contract-desc" class="text-[11px] text-slate-400 mt-1">No contract offered right now. Check back soon.</p>
+                        </div>
+                        <button id="contract-claim-btn" onclick="claimContract()" disabled
+                            class="w-full py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-xs transition">
+                            No Offer
+                        </button>
+                    </div>
+
+                    <!-- Carbon credits card -->
+                    <div class="earn-card bg-slate-900 rounded-xl p-4 border border-slate-800 flex flex-col justify-between space-y-2">
+                        <div>
+                            <span class="text-xs font-bold text-slate-200 flex items-center gap-1.5"><i class="fa-solid fa-leaf text-emerald-400"></i> Carbon Credits</span>
+                            <p class="text-[11px] text-slate-400 mt-1">Renewable output earns tradable credits over time. Cash them in anytime.</p>
+                            <p class="text-sm font-mono-num text-emerald-400 font-bold mt-2" id="carbon-credit-balance">$0</p>
+                        </div>
+                        <button onclick="sellCarbonCredits()" id="carbon-sell-btn" disabled
+                            class="w-full py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-xs transition">
+                            Sell Credits
+                        </button>
+                    </div>
+
+                    <!-- Stability streak card -->
+                    <div class="earn-card bg-slate-900 rounded-xl p-4 border border-slate-800 flex flex-col justify-between space-y-2">
+                        <div>
+                            <span class="text-xs font-bold text-slate-200 flex items-center gap-1.5"><i class="fa-solid fa-gauge-high text-amber-400"></i> Stability Bonus</span>
+                            <p class="text-[11px] text-slate-400 mt-1">Keep grid frequency steady at 60 Hz to earn automatic payouts.</p>
+                        </div>
+                        <div class="space-y-1">
+                            <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                                <div id="streak-bar" class="h-full bg-amber-500 transition-all duration-300" style="width:0%"></div>
+                            </div>
+                            <p class="text-[10px] text-slate-500 font-mono" id="streak-label">Next bonus: $50k</p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- FLEET -->
+            <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-base font-bold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-server text-sky-400"></i> Your Power Plants
+                    </h2>
+                    <button onclick="autoBalanceGrid()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-400 text-xs font-semibold border border-sky-500/30 flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Balance
+                    </button>
+                </div>
+                <div id="active-plants-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+            </div>
+
+        </div>
+
+        <!-- TAB 2: MARKET -->
+        <div id="tab-market" class="tab-content hidden space-y-4">
+            <div>
+                <h2 class="text-lg font-bold text-slate-200 flex items-center gap-2">
+                    <i class="fa-solid fa-city text-sky-400"></i> Build a New Plant
+                </h2>
+                <p class="text-xs text-slate-400">Buy generation capacity to meet demand and grow your income.</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="market-plants-grid"></div>
+        </div>
+
+        <!-- TAB 3: GUIDE -->
+        <div id="tab-manual" class="tab-content hidden space-y-4">
+            <div class="bg-slate-900 rounded-xl p-6 border border-slate-800 space-y-4 max-w-3xl">
+                <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <i class="fa-solid fa-graduation-cap text-sky-400"></i> How to Play
+                </h2>
+                <ul class="space-y-2.5 text-sm text-slate-300 list-disc list-inside">
+                    <li>Match <span class="text-amber-400 font-semibold">generation</span> to <span class="text-amber-400 font-semibold">demand</span> — too little or too much pushes frequency away from 60 Hz.</li>
+                    <li>Sell electricity automatically every tick. Build more plants in the Market tab to sell more.</li>
+                    <li>Claim <span class="text-sky-400 font-semibold">Grid Contracts</span> when they appear for quick cash bonuses.</li>
+                    <li>Run renewables (solar, wind, hydro, geothermal) to build up <span class="text-emerald-400 font-semibold">Carbon Credits</span> you can sell anytime.</li>
+                    <li>Keep frequency steady for a while to earn a passive <span class="text-amber-400 font-semibold">Stability Bonus</span>.</li>
+                    <li>Coal and gas plants are cheap but emit CO2, which costs you a carbon tax — balance cost vs. cleanliness.</li>
+                    <li>If a plant trips offline, repair it from its card to bring it back online.</li>
+                </ul>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        /* ==========================================================================
+           POWERGRID NEXUS ENGINE
+           ========================================================================== */
+
+        const state = {
+            isRunning: true,
+            speedMultiplier: 2,
+            timeSeconds: 0,
+            day: 1,
+            funds: 12500000,
+            cityDemand: 500,
+            gridFrequency: 60.00,
+            totalCO2Rate: 0,
+            cumulativeCO2: 0,
+            electricityPricePerMWh: 45,
+            carbonTaxPerTon: 50,
+
+            weather: { solarFactor: 0.85, windFactor: 0.70, tempCelsius: 24 },
+            history: { labels: [], demand: [], supply: [] },
+
+            // Earning mechanics
+            carbonCredits: 0,
+            stabilityStreakSeconds: 0,
+            nextStabilityBonusAt: 3600, // 1 sim hour of steady frequency
+            stabilityBonusAmount: 50000,
+            contract: null, // { desc, requirement, reward, expiresAtTick }
+            nextContractCheckTick: 4, // real ticks (0.5s each)
+            tickCount: 0,
+            achievementsUnlocked: {},
+
+            activePlants: [
+                { id: 'plant_nuclear_1', type: 'nuclear', name: 'St. Jude Nuclear Unit 1', maxCapacity: 350, currentOutput: 300, targetOutput: 300, rampRate: 1.5, fuelCostPerMWh: 12, co2PerMWh: 0, status: 'ONLINE', tripChance: 0.0001 },
+                { id: 'plant_coal_1', type: 'coal', name: 'Blackwood Coal Station', maxCapacity: 200, currentOutput: 150, targetOutput: 150, rampRate: 5.0, fuelCostPerMWh: 32, co2PerMWh: 0.92, status: 'ONLINE', tripChance: 0.0005 },
+                { id: 'plant_hydro_1', type: 'hydro', name: 'Cascade Hydro Electric Dam', maxCapacity: 120, currentOutput: 50, targetOutput: 50, rampRate: 25.0, fuelCostPerMWh: 2, co2PerMWh: 0, reservoir: 85, status: 'ONLINE', tripChance: 0.0001 }
+            ]
+        };
+
+        const PLANT_CATALOG = {
+            nuclear: { name: 'Nuclear Plant', icon: 'fa-atom', cost: 8000000, maxCapacity: 400, rampRate: 2.0, fuelCost: 10, co2: 0, desc: 'Massive zero-carbon baseload power. Slow to ramp.' },
+            coal: { name: 'Coal Plant', icon: 'fa-smog', cost: 3000000, maxCapacity: 250, rampRate: 6.0, fuelCost: 28, co2: 0.88, desc: 'Cheap and reliable, but high CO2 means a bigger carbon tax bill.' },
+            hydro: { name: 'Hydro Dam', icon: 'fa-water', cost: 4000000, maxCapacity: 180, rampRate: 30.0, fuelCost: 2, co2: 0, desc: 'Fast-ramping clean power, great for handling demand spikes.' },
+            geothermal: { name: 'Geothermal Plant', icon: 'fa-volcano', cost: 5000000, maxCapacity: 150, rampRate: 10.0, fuelCost: 4, co2: 0, desc: 'Clean, steady baseload power, unaffected by weather.' },
+            solar: { name: 'Solar Farm', icon: 'fa-solar-panel', cost: 2500000, maxCapacity: 150, rampRate: 100.0, fuelCost: 0, co2: 0, desc: 'Zero fuel cost. Output depends on sunlight.' },
+            wind: { name: 'Wind Farm', icon: 'fa-wind', cost: 3500000, maxCapacity: 180, rampRate: 100.0, fuelCost: 0, co2: 0, desc: 'Zero fuel cost. Output depends on wind speed.' }
+        };
+
+        const CONTRACT_CLIENTS = [
+            'Metro Utility Co.', 'Northgate Industries', 'Solaris Grid Partners', 'Union Power Authority',
+            'BrightLine Energy', 'Cascadia Municipal Grid', 'Ferrotech Manufacturing', 'Aurora Data Centers',
+            'Redstone Rail Network', 'Harbor District Council', 'Vantage Cloud Campus', 'Ironvale Steelworks',
+            'Sunridge Co-op', 'Pinecrest Hospital Network', 'Delta Freight Terminals', 'Glasspoint Labs'
+        ];
+
+        function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+        function randRange(min, max) { return min + Math.random() * (max - min); }
+
+        // Each generator produces a fresh, randomly-parameterized contract every time it's called,
+        // so the pool of possible contracts is effectively unlimited even with a small set of kinds.
+        const CONTRACT_GENERATORS = [
+            () => {
+                const factor = randRange(0.95, 1.2);
+                const reward = Math.round(randRange(50000, 90000) * factor);
+                return {
+                    desc: `Cover at least ${Math.round(factor * 100)}% of current city demand.`,
+                    check: (totalSupplyMW) => totalSupplyMW >= state.cityDemand * factor,
+                    reward
+                };
+            },
+            () => {
+                const pct = Math.round(randRange(30, 70));
+                const reward = Math.round(randRange(60000, 90000) * (pct / 50));
+                return {
+                    desc: `Push renewable output to at least ${pct}% of total generation.`,
+                    check: (totalSupplyMW) => renewableShare(totalSupplyMW) * 100 >= pct,
+                    reward
+                };
+            },
+            () => {
+                const band = pick([0.1, 0.2, 0.3, 0.4]);
+                return {
+                    desc: `Hold grid frequency within ±${band.toFixed(1)} Hz of 60 Hz.`,
+                    check: () => Math.abs(state.gridFrequency - 60) <= band,
+                    reward: Math.round(randRange(40000, 100000) * (0.4 / band))
+                };
+            },
+            () => {
+                const maxRate = Math.round(randRange(20, 120));
+                const reward = Math.round(randRange(50000, 100000) * (100 / (maxRate + 20)));
+                return {
+                    desc: `Keep CO2 emission rate under ${maxRate} t/h.`,
+                    check: () => state.totalCO2Rate <= maxRate,
+                    reward
+                };
+            },
+            () => {
+                const reward = Math.round(randRange(70000, 130000));
+                return {
+                    desc: `Keep every plant online — zero trips or outages.`,
+                    check: () => state.activePlants.every(p => p.status === 'ONLINE'),
+                    reward
+                };
+            },
+            () => {
+                const type = pick(['solar', 'wind', 'hydro']);
+                const plantsOfType = state.activePlants.filter(p => p.type === type);
+                const maxCap = plantsOfType.reduce((s, p) => s + p.maxCapacity, 0) || 100;
+                const threshold = Math.round(maxCap * randRange(0.4, 0.8));
+                const reward = Math.round(randRange(60000, 110000));
+                return {
+                    desc: `Get combined ${type} output above ${threshold} MW.`,
+                    check: () => state.activePlants.filter(p => p.type === type).reduce((s, p) => s + p.currentOutput, 0) >= threshold,
+                    reward
+                };
+            },
+            () => {
+                const target = Math.round(randRange(400, 900));
+                const reward = Math.round(randRange(50000, 110000));
+                return {
+                    desc: `Reach total generation of at least ${target} MW.`,
+                    check: (totalSupplyMW) => totalSupplyMW >= target,
+                    reward
+                };
+            }
+        ];
+
+        function generateRandomContract() {
+            const client = pick(CONTRACT_CLIENTS);
+            const gen = pick(CONTRACT_GENERATORS)();
+            // Real-world duration, independent of sim speed: 40–70 real seconds (2 ticks/sec)
+            const durationTicks = Math.round(randRange(80, 140));
+            return {
+                client,
+                desc: gen.desc,
+                check: gen.check,
+                reward: Math.max(30000, Math.round(gen.reward / 1000) * 1000),
+                durationTicks
+            };
+        }
+
+        function renewableShare(totalSupplyMW) {
+            if (totalSupplyMW <= 0) return 0;
+            let renewableMW = 0;
+            state.activePlants.forEach(p => {
+                if (['hydro', 'solar', 'wind', 'geothermal'].includes(p.type)) renewableMW += p.currentOutput;
+            });
+            return renewableMW / totalSupplyMW;
+        }
+
+        /* ==========================================================================
+           SIMULATION PHYSICS
+           ========================================================================== */
+
+        function calculateCityDemand(simSeconds) {
+            const hourOfDay = (simSeconds / 3600) % 24;
+            const morningPeak = Math.exp(-Math.pow(hourOfDay - 8, 2) / 8) * 150;
+            const eveningPeak = Math.exp(-Math.pow(hourOfDay - 19, 2) / 10) * 250;
+            const nightDip = Math.sin((hourOfDay - 2) * Math.PI / 12) * 40;
+            const baseDemand = 380 + morningPeak + eveningPeak + nightDip;
+            const noise = (Math.random() - 0.5) * 10;
+            return Math.max(100, Math.round(baseDemand + noise));
+        }
+
+        function tickSimulation() {
+            if (!state.isRunning) return;
+
+            state.tickCount += 1; // one real tick = 0.5s, independent of sim speed
+
+            const secondsPerTick = 20 * state.speedMultiplier;
+            state.timeSeconds += secondsPerTick;
+            state.day = Math.floor(state.timeSeconds / 86400) + 1;
+
+            const hour = (state.timeSeconds / 3600) % 24;
+            state.weather.solarFactor = (hour >= 6 && hour <= 18) ? Math.sin((hour - 6) * Math.PI / 12) : 0;
+            state.weather.windFactor = Math.min(1.0, Math.max(0.1, 0.6 + Math.sin(state.timeSeconds / 5000) * 0.3 + (Math.random() - 0.5) * 0.1));
+
+            state.cityDemand = calculateCityDemand(state.timeSeconds);
+
+            let totalSupplyMW = 0;
+            let currentCO2Rate = 0;
+
+            state.activePlants.forEach(plant => {
+                if (plant.status === 'ONLINE') {
+                    if (plant.type === 'solar') {
+                        plant.targetOutput = plant.maxCapacity * state.weather.solarFactor;
+                    } else if (plant.type === 'wind') {
+                        plant.targetOutput = plant.maxCapacity * state.weather.windFactor;
+                    } else if (plant.type === 'hydro') {
+                        if (plant.currentOutput > 10) {
+                            plant.reservoir = Math.max(0, plant.reservoir - (plant.currentOutput / plant.maxCapacity) * 0.02);
+                        } else {
+                            plant.reservoir = Math.min(100, plant.reservoir + 0.01);
+                        }
+                        if (plant.reservoir <= 0) plant.targetOutput = 0;
+                    }
+
+                    const diff = plant.targetOutput - plant.currentOutput;
+                    if (Math.abs(diff) <= plant.rampRate) {
+                        plant.currentOutput = plant.targetOutput;
+                    } else {
+                        plant.currentOutput += Math.sign(diff) * plant.rampRate;
+                    }
+
+                    totalSupplyMW += plant.currentOutput;
+                    currentCO2Rate += (plant.currentOutput * plant.co2PerMWh);
+
+                    if (Math.random() < plant.tripChance) {
+                        plant.status = 'TRIPPED';
+                        showAlert(`EMERGENCY TRIP: ${plant.name} suffered a sudden generator fault!`);
+                    }
+                } else if (plant.status === 'TRIPPED') {
+                    plant.currentOutput = 0;
+                }
+            });
+
+            state.totalCO2Rate = Math.round(currentCO2Rate);
+            state.cumulativeCO2 += (currentCO2Rate * (secondsPerTick / 3600));
+
+            const powerImbalanceMW = totalSupplyMW - state.cityDemand;
+            const gridInertia = 450;
+            const deltaFreq = (powerImbalanceMW / gridInertia) * 0.05;
+            state.gridFrequency = Math.max(57.0, Math.min(63.0, state.gridFrequency + deltaFreq + (60.0 - state.gridFrequency) * 0.02));
+
+            // ---- FINANCES ----
+            const hourFraction = secondsPerTick / 3600;
+            const electricitySoldMW = Math.min(totalSupplyMW, state.cityDemand);
+            const revenue = electricitySoldMW * state.electricityPricePerMWh * hourFraction;
+
+            let operationalExpenses = 0;
+            state.activePlants.forEach(p => { operationalExpenses += (p.currentOutput * p.fuelCostPerMWh * hourFraction); });
+
+            const carbonPenalty = currentCO2Rate * state.carbonTaxPerTon * hourFraction;
+
+            const netTickChange = revenue - operationalExpenses - carbonPenalty;
+            state.funds += netTickChange;
+
+            // ---- CARBON CREDITS (a way to earn) ----
+            const renewableMW = totalSupplyMW * renewableShare(totalSupplyMW);
+            state.carbonCredits += renewableMW * 2 * hourFraction; // $2 / MWh of clean generation
+
+            // ---- STABILITY STREAK (a way to earn) ----
+            if (state.gridFrequency >= 59.8 && state.gridFrequency <= 60.2) {
+                state.stabilityStreakSeconds += secondsPerTick;
+                if (state.stabilityStreakSeconds >= state.nextStabilityBonusAt) {
+                    state.funds += state.stabilityBonusAmount;
+                    spawnFloatGain(state.stabilityBonusAmount);
+                    showToast('Stability Bonus', `Grid held steady — +$${state.stabilityBonusAmount.toLocaleString()}`, 'amber');
+                    state.nextStabilityBonusAt += 3600;
+                }
+            } else {
+                state.stabilityStreakSeconds = 0;
+            }
+
+            // ---- CONTRACTS (a way to earn) ----
+            maybeOfferContract(totalSupplyMW);
+            if (state.contract && state.tickCount >= state.contract.expiresAtTick) {
+                state.contract = null;
+            }
+
+            checkAchievements(totalSupplyMW);
+
+            if (state.gridFrequency < 58.5 || state.gridFrequency > 61.5) {
+                showAlert(`GRID BLACKOUT: Frequency collapsed to ${state.gridFrequency.toFixed(2)} Hz! Imbalance: ${powerImbalanceMW.toFixed(0)} MW.`);
+            }
+
+            if (Math.floor(state.timeSeconds / secondsPerTick) % 3 === 0) {
+                recordTelemetry(totalSupplyMW);
+            }
+
+            renderUI(totalSupplyMW, netTickChange);
+        }
+
+        function maybeOfferContract(totalSupplyMW) {
+            if (state.contract) return;
+            if (state.tickCount < state.nextContractCheckTick) return;
+            state.nextContractCheckTick = state.tickCount + 10; // next chance ~5 real seconds later
+            if (Math.random() < 0.5) {
+                const c = generateRandomContract();
+                state.contract = {
+                    client: c.client,
+                    desc: c.desc,
+                    check: c.check,
+                    reward: c.reward,
+                    expiresAtTick: state.tickCount + c.durationTicks
+                };
+            }
+        }
+
+        function claimContract() {
+            if (!state.contract) return;
+            const totalSupplyMW = state.activePlants.reduce((sum, p) => sum + p.currentOutput, 0);
+            if (!state.contract.check(totalSupplyMW)) {
+                showToast('Not Yet', 'Requirement not met — keep trying before it expires.', 'rose');
+                return;
+            }
+            state.funds += state.contract.reward;
+            spawnFloatGain(state.contract.reward);
+            showToast('Contract Fulfilled', `${state.contract.client} paid +$${state.contract.reward.toLocaleString()}`, 'sky');
+            state.contract = null;
+        }
+
+        function sellCarbonCredits() {
+            const amount = Math.round(state.carbonCredits);
+            if (amount <= 0) return;
+            state.funds += amount;
+            state.carbonCredits = 0;
+            spawnFloatGain(amount);
+            showToast('Credits Sold', `+$${amount.toLocaleString()} from clean energy`, 'emerald');
+        }
+
+        function checkAchievements(totalSupplyMW) {
+            const unlock = (id, title, sub, reward) => {
+                if (state.achievementsUnlocked[id]) return;
+                state.achievementsUnlocked[id] = true;
+                if (reward) {
+                    state.funds += reward;
+                    spawnFloatGain(reward);
+                }
+                showToast(title, sub, 'purple');
+            };
+
+            if (state.activePlants.length >= 4) {
+                unlock('expand4', 'Achievement: Expanding Fleet', '4th plant built — +$100,000', 100000);
+            }
+            if (state.activePlants.length >= 6) {
+                unlock('expand6', 'Achievement: Full House', '6th plant built — +$200,000', 200000);
+            }
+            if (renewableShare(totalSupplyMW) >= 0.6 && totalSupplyMW > 0) {
+                unlock('green60', 'Achievement: Green Pioneer', 'Renewables at 60%+ — +$150,000', 150000);
+            }
+            if (state.funds >= 25000000) {
+                unlock('rich25', 'Achievement: Deep Pockets', 'Treasury passed $25M', 0);
+            }
+        }
+
+        /* ==========================================================================
+           MONEY UI FEEDBACK
+           ========================================================================== */
+
+        function spawnFloatGain(amount) {
+            const wrap = document.querySelector('.money-wrap');
+            if (!wrap) return;
+            const el = document.createElement('span');
+            el.className = 'float-gain ' + (amount >= 0 ? 'text-emerald-400' : 'text-rose-400');
+            el.innerText = `${amount >= 0 ? '+' : '-'}$${Math.abs(Math.round(amount)).toLocaleString()}`;
+            wrap.appendChild(el);
+            setTimeout(() => el.remove(), 1700);
+        }
+
+        function showToast(title, sub, color) {
+            const colors = {
+                amber: 'border-amber-500/40 text-amber-400',
+                sky: 'border-sky-500/40 text-sky-400',
+                emerald: 'border-emerald-500/40 text-emerald-400',
+                purple: 'border-purple-500/40 text-purple-400',
+                rose: 'border-rose-500/40 text-rose-400'
+            };
+            const stack = document.getElementById('toast-stack');
+            const el = document.createElement('div');
+            el.className = `toast bg-slate-900 border ${colors[color] || colors.sky} rounded-lg p-3 shadow-xl`;
+            el.innerHTML = `<p class="text-xs font-bold ${(colors[color] || colors.sky).split(' ')[1]}">${title}</p><p class="text-[11px] text-slate-300 mt-0.5">${sub}</p>`;
+            stack.appendChild(el);
+            setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.4s'; setTimeout(() => el.remove(), 400); }, 3600);
+        }
+
+        /* ==========================================================================
+           MARKET & PLANT ACTIONS
+           ========================================================================== */
+
+        function renderBuildMarket() {
+            const container = document.getElementById('market-plants-grid');
+            if (!container) return;
+            container.innerHTML = '';
+
+            Object.keys(PLANT_CATALOG).forEach(type => {
+                const plant = PLANT_CATALOG[type];
+                const canAfford = state.funds >= plant.cost;
+
+                const card = document.createElement('div');
+                card.className = 'bg-slate-900 rounded-xl p-4 border border-slate-800 space-y-3 flex flex-col justify-between';
+                card.innerHTML = `
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <div class="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center text-sky-400 text-base">
+                                <i class="fa-solid ${plant.icon}"></i>
+                            </div>
+                            <span class="font-mono text-emerald-400 font-bold text-sm">$${(plant.cost / 1000000).toFixed(1)}M</span>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-sm text-slate-100">${plant.name}</h3>
+                            <p class="text-xs text-slate-400 mt-1">${plant.desc}</p>
+                        </div>
+                        <div class="text-[11px] font-mono text-slate-500 pt-1 border-t border-slate-800/80">
+                            ${plant.maxCapacity} MW capacity · $${plant.fuelCost}/MWh
+                        </div>
+                    </div>
+                    <button onclick="constructPlant('${type}')" ${!canAfford ? 'disabled' : ''}
+                        class="w-full py-2 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-xs transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-hammer"></i> Build
+                    </button>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function constructPlant(type) {
+            const catalogSpec = PLANT_CATALOG[type];
+            if (!catalogSpec || state.funds < catalogSpec.cost) return;
+
+            state.funds -= catalogSpec.cost;
+            spawnFloatGain(-catalogSpec.cost);
+
+            const count = state.activePlants.filter(p => p.type === type).length + 1;
+            const newPlant = {
+                id: `plant_${type}_${Date.now()}`,
+                type: type,
+                name: `${catalogSpec.name.split(' ')[0]} Unit #${count}`,
+                maxCapacity: catalogSpec.maxCapacity,
+                currentOutput: 0,
+                targetOutput: Math.round(catalogSpec.maxCapacity * 0.5),
+                rampRate: catalogSpec.rampRate,
+                fuelCostPerMWh: catalogSpec.fuelCost,
+                co2PerMWh: catalogSpec.co2,
+                status: 'ONLINE',
+                tripChance: 0.0002
+            };
+            if (type === 'hydro') newPlant.reservoir = 100;
+
+            state.activePlants.push(newPlant);
+            renderBuildMarket();
+            showAlert(`New Facility Online: ${newPlant.name} constructed successfully.`);
+        }
+
+        function updatePlantTarget(plantId, val) {
+            const plant = state.activePlants.find(p => p.id === plantId);
+            if (plant) plant.targetOutput = parseFloat(val);
+        }
+
+        function repairPlant(plantId) {
+            const plant = state.activePlants.find(p => p.id === plantId);
+            const repairCost = 50000;
+            if (plant && state.funds >= repairCost) {
+                state.funds -= repairCost;
+                spawnFloatGain(-repairCost);
+                plant.status = 'ONLINE';
+                showAlert(`Facility Restored: ${plant.name} generator re-synchronized to grid.`);
+            }
+        }
+
+        function decommissionPlant(plantId) {
+            state.activePlants = state.activePlants.filter(p => p.id !== plantId);
+        }
+
+        function showAlert(msg) {
+            const banner = document.getElementById('alert-banner');
+            const msgElem = document.getElementById('alert-message');
+            if (banner && msgElem) {
+                msgElem.innerText = msg;
+                banner.classList.remove('hidden');
+            }
+        }
+
+        /* ==========================================================================
+           RENDERING
+           ========================================================================== */
+
+        function recordTelemetry(totalSupplyMW) {
+            const timeStr = formatSimTime(state.timeSeconds, false);
+            state.history.labels.push(timeStr);
+            state.history.demand.push(state.cityDemand);
+            state.history.supply.push(Math.round(totalSupplyMW));
+            if (state.history.labels.length > 30) {
+                state.history.labels.shift();
+                state.history.demand.shift();
+                state.history.supply.shift();
+            }
+        }
+
+        function formatSimTime(totalSecs, showDay = true) {
+            const days = Math.floor(totalSecs / 86400) + 1;
+            const hours = Math.floor((totalSecs % 86400) / 3600);
+            const mins = Math.floor((totalSecs % 3600) / 60);
+            const hStr = String(hours).padStart(2, '0');
+            const mStr = String(mins).padStart(2, '0');
+            return showDay ? `Day ${days}, ${hStr}:${mStr}` : `${hStr}:${mStr}`;
+        }
+
+        function renderUI(totalSupplyMW, netTickChange) {
+            document.getElementById('sim-clock').innerText = formatSimTime(state.timeSeconds);
+            document.getElementById('metric-demand').innerText = `${state.cityDemand.toFixed(0)} MW`;
+            document.getElementById('metric-generation').innerText = `${totalSupplyMW.toFixed(0)} MW`;
+            document.getElementById('metric-co2').innerText = `${state.totalCO2Rate} t/h`;
+
+            // Money display with pulse + floating delta
+            const fundsElem = document.getElementById('metric-funds');
+            fundsElem.innerText = `$${(state.funds / 1000000).toFixed(2)}M`;
+            fundsElem.classList.remove('money-pulse');
+            void fundsElem.offsetWidth;
+            fundsElem.classList.add('money-pulse');
+            if (Math.abs(netTickChange) > 1) spawnFloatGain(netTickChange);
+
+            // Income per hour estimate (based on this tick, annualized to hourly)
+            const secondsPerTick = 20 * state.speedMultiplier;
+            const hourlyRate = netTickChange / (secondsPerTick / 3600);
+            const incomeElem = document.getElementById('income-rate');
+            incomeElem.innerText = `${hourlyRate >= 0 ? '+' : '-'}$${Math.abs(Math.round(hourlyRate)).toLocaleString()} / hr`;
+            incomeElem.className = `text-[11px] font-mono mt-0.5 ${hourlyRate >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+
+            // Frequency badge (simplified: color + text only)
+            const freqElem = document.getElementById('metric-frequency');
+            if (state.gridFrequency >= 59.8 && state.gridFrequency <= 60.2) {
+                freqElem.innerText = `${state.gridFrequency.toFixed(2)} Hz · Stable`;
+                freqElem.className = 'text-base font-bold font-mono-num text-emerald-400';
+            } else if (state.gridFrequency >= 59.0 && state.gridFrequency <= 61.0) {
+                freqElem.innerText = `${state.gridFrequency.toFixed(2)} Hz · Drifting`;
+                freqElem.className = 'text-base font-bold font-mono-num text-amber-400';
+            } else {
+                freqElem.innerText = `${state.gridFrequency.toFixed(2)} Hz · Critical`;
+                freqElem.className = 'text-base font-bold font-mono-num text-rose-400 animate-pulse';
+            }
+
+            renderEarnPanel();
+            renderActivePlantCards();
+            drawTelemetryChart();
+        }
+
+        function renderEarnPanel() {
+            // Contract
+            const descElem = document.getElementById('contract-desc');
+            const timerElem = document.getElementById('contract-timer');
+            const btnElem = document.getElementById('contract-claim-btn');
+            if (state.contract) {
+                const secsLeft = Math.max(0, Math.round((state.contract.expiresAtTick - state.tickCount) * 0.5));
+                descElem.innerText = `${state.contract.client}: ${state.contract.desc} Reward: $${state.contract.reward.toLocaleString()}.`;
+                timerElem.innerText = `${secsLeft}s left`;
+                btnElem.disabled = false;
+                btnElem.innerText = `Claim $${state.contract.reward.toLocaleString()}`;
+            } else {
+                descElem.innerText = 'No contract offered right now. Check back soon.';
+                timerElem.innerText = '';
+                btnElem.disabled = true;
+                btnElem.innerText = 'No Offer';
+            }
+
+            // Carbon credits
+            const creditAmount = Math.round(state.carbonCredits);
+            document.getElementById('carbon-credit-balance').innerText = `$${creditAmount.toLocaleString()}`;
+            document.getElementById('carbon-sell-btn').disabled = creditAmount <= 0;
+
+            // Stability streak
+            const pct = Math.min(100, (state.stabilityStreakSeconds / state.nextStabilityBonusAt) * 100);
+            document.getElementById('streak-bar').style.width = `${pct}%`;
+            document.getElementById('streak-label').innerText = `Next bonus: $${state.stabilityBonusAmount.toLocaleString()} (${Math.round(pct)}%)`;
+        }
+
+        function autoBalanceGrid() {
+            let requiredMW = state.cityDemand;
+            let fixedMW = 0;
+            state.activePlants.forEach(p => { if (p.type === 'solar' || p.type === 'wind') fixedMW += p.currentOutput; });
+            let remainingDemand = Math.max(0, requiredMW - fixedMW);
+
+            const controllable = state.activePlants
+                .filter(p => p.status === 'ONLINE' && p.type !== 'solar' && p.type !== 'wind')
+                .sort((a, b) => a.fuelCostPerMWh - b.fuelCostPerMWh);
+
+            controllable.forEach(plant => {
+                if (remainingDemand <= 0) {
+                    plant.targetOutput = 0;
+                } else if (remainingDemand >= plant.maxCapacity) {
+                    plant.targetOutput = plant.maxCapacity;
+                    remainingDemand -= plant.maxCapacity;
+                } else {
+                    plant.targetOutput = remainingDemand;
+                    remainingDemand = 0;
+                }
+            });
+        }
+
+        function renderActivePlantCards() {
+            const container = document.getElementById('active-plants-container');
+            if (!container) return;
+            container.innerHTML = '';
+
+            state.activePlants.forEach(plant => {
+                const catalogSpec = PLANT_CATALOG[plant.type] || {};
+                const card = document.createElement('div');
+                card.className = `plant-card bg-slate-900 rounded-xl p-4 border ${plant.status === 'TRIPPED' ? 'border-rose-500' : 'border-slate-800'} space-y-3`;
+
+                card.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2.5">
+                            <div class="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-sky-400">
+                                <i class="fa-solid ${catalogSpec.icon || 'fa-bolt'}"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-bold text-xs text-slate-200 leading-tight">${plant.name}</h3>
+                                <span class="text-[10px] text-slate-400 uppercase tracking-wider font-mono">${plant.type}</span>
+                            </div>
+                        </div>
+                        <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded ${plant.status === 'ONLINE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'}">
+                            ${plant.status}
+                        </span>
+                    </div>
+
+                    <div class="space-y-1 pt-1 border-t border-slate-800/80">
+                        <div class="flex justify-between items-center">
+                            <label class="text-[11px] text-slate-400">Output</label>
+                            <span class="text-xs font-mono text-sky-400 font-semibold">${Math.round(plant.currentOutput)} / ${plant.maxCapacity} MW</span>
+                        </div>
+                        <input type="range" min="0" max="${plant.maxCapacity}" value="${plant.targetOutput}"
+                            ${plant.status === 'TRIPPED' || plant.type === 'solar' || plant.type === 'wind' ? 'disabled' : ''}
+                            oninput="updatePlantTarget('${plant.id}', this.value)"
+                            class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 disabled:opacity-40">
+                    </div>
+
+                    <div class="flex items-center justify-between pt-1 text-xs">
+                        ${plant.status === 'TRIPPED' ? `
+                            <button onclick="repairPlant('${plant.id}')" class="w-full py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] transition">
+                                <i class="fa-solid fa-wrench mr-1"></i> Repair ($50k)
+                            </button>
+                        ` : `
+                            <div class="text-[10px] text-slate-400 font-mono">$${plant.fuelCostPerMWh}/MWh</div>
+                            <button onclick="decommissionPlant('${plant.id}')" class="text-slate-500 hover:text-rose-400 transition text-[11px]">
+                                <i class="fa-solid fa-trash-can"></i> Decom
+                            </button>
+                        `}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        /* ==========================================================================
+           CANVAS CHART
+           ========================================================================== */
+
+        function drawTelemetryChart() {
+            const canvas = document.getElementById('canvas-dispatch-chart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+
+            const width = rect.width;
+            const height = rect.height;
+            ctx.clearRect(0, 0, width, height);
+
+            const dataLength = state.history.labels.length;
+            if (dataLength < 2) return;
+
+            const maxVal = Math.max(800, ...state.history.demand, ...state.history.supply) + 50;
+
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (height / 4) * i;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            const getX = (index) => (index / (dataLength - 1)) * width;
+            const getY = (val) => height - (val / maxVal) * height;
+
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            state.history.demand.forEach((val, idx) => {
+                const x = getX(idx), y = getY(val);
+                if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            state.history.supply.forEach((val, idx) => {
+                const x = getX(idx), y = getY(val);
+                if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
+            ctx.lineTo(width, height);
+            ctx.lineTo(0, height);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        /* ==========================================================================
+           NAV & CONTROLS
+           ========================================================================== */
+
+        document.querySelectorAll('.nav-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.nav-tab').forEach(t => {
+                    t.classList.remove('active', 'text-sky-400', 'border-sky-400');
+                    t.classList.add('text-slate-400', 'border-transparent');
+                });
+                btn.classList.add('active', 'text-sky-400', 'border-sky-400');
+                btn.classList.remove('text-slate-400', 'border-transparent');
+
+                const targetTab = btn.getAttribute('data-tab');
+                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
+                document.getElementById(targetTab)?.classList.remove('hidden');
+
+                if (targetTab === 'tab-market') renderBuildMarket();
+            });
+        });
+
+        document.getElementById('btn-play-pause')?.addEventListener('click', () => {
+            state.isRunning = !state.isRunning;
+            const icon = document.getElementById('play-icon');
+            const text = document.getElementById('play-text');
+            if (state.isRunning) {
+                icon.className = 'fa-solid fa-pause';
+                text.innerText = 'Pause';
+            } else {
+                icon.className = 'fa-solid fa-play';
+                text.innerText = 'Resume';
+            }
+        });
+
+        document.getElementById('sim-speed')?.addEventListener('change', (e) => {
+            state.speedMultiplier = parseInt(e.target.value);
+        });
+
+        window.addEventListener('resize', () => drawTelemetryChart());
+
+        /* ==========================================================================
+           SAVE / QUIT / CONTINUE
+           ========================================================================== */
+
+        const SAVE_KEY = 'powergridNexusSave_v1';
+
+        function saveGame() {
+            const saveObj = {
+                funds: state.funds,
+                timeSeconds: state.timeSeconds,
+                day: state.day,
+                cityDemand: state.cityDemand,
+                gridFrequency: state.gridFrequency,
+                totalCO2Rate: state.totalCO2Rate,
+                cumulativeCO2: state.cumulativeCO2,
+                electricityPricePerMWh: state.electricityPricePerMWh,
+                carbonTaxPerTon: state.carbonTaxPerTon,
+                weather: state.weather,
+                speedMultiplier: state.speedMultiplier,
+                carbonCredits: state.carbonCredits,
+                stabilityStreakSeconds: state.stabilityStreakSeconds,
+                nextStabilityBonusAt: state.nextStabilityBonusAt,
+                stabilityBonusAmount: state.stabilityBonusAmount,
+                achievementsUnlocked: state.achievementsUnlocked,
+                activePlants: state.activePlants,
+                savedAt: Date.now()
+            };
+            try {
+                localStorage.setItem(SAVE_KEY, JSON.stringify(saveObj));
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function loadGame(saved) {
+            Object.assign(state, {
+                funds: saved.funds,
+                timeSeconds: saved.timeSeconds,
+                day: saved.day,
+                cityDemand: saved.cityDemand,
+                gridFrequency: saved.gridFrequency,
+                totalCO2Rate: saved.totalCO2Rate,
+                cumulativeCO2: saved.cumulativeCO2,
+                electricityPricePerMWh: saved.electricityPricePerMWh,
+                carbonTaxPerTon: saved.carbonTaxPerTon,
+                weather: saved.weather,
+                speedMultiplier: saved.speedMultiplier,
+                carbonCredits: saved.carbonCredits,
+                stabilityStreakSeconds: saved.stabilityStreakSeconds,
+                nextStabilityBonusAt: saved.nextStabilityBonusAt,
+                stabilityBonusAmount: saved.stabilityBonusAmount,
+                achievementsUnlocked: saved.achievementsUnlocked || {},
+                activePlants: saved.activePlants || state.activePlants
+            });
+            document.getElementById('sim-speed').value = String(state.speedMultiplier);
+        }
+
+        let gameLoopStarted = false;
+        function startGameLoop() {
+            if (gameLoopStarted) return;
+            gameLoopStarted = true;
+            renderBuildMarket();
+            renderEarnPanel();
+            setInterval(tickSimulation, 500);
+        }
+
+        document.getElementById('btn-save-quit')?.addEventListener('click', () => {
+            state.isRunning = false;
+            saveGame();
+            document.getElementById('save-overlay').classList.remove('hidden');
+        });
+
+        document.getElementById('btn-resume-game')?.addEventListener('click', () => {
+            document.getElementById('save-overlay').classList.add('hidden');
+            state.isRunning = true;
+            document.getElementById('play-icon').className = 'fa-solid fa-pause';
+            document.getElementById('play-text').innerText = 'Pause';
+        });
+
+        window.onload = function () {
+            const raw = localStorage.getItem(SAVE_KEY);
+            if (raw) {
+                try {
+                    const saved = JSON.parse(raw);
+                    const summary = document.getElementById('continue-summary');
+                    summary.innerText = `Day ${saved.day}, Treasury $${(saved.funds / 1000000).toFixed(2)}M — continue where you left off?`;
+                    document.getElementById('continue-overlay').classList.remove('hidden');
+
+                    document.getElementById('btn-continue-yes').addEventListener('click', () => {
+                        loadGame(saved);
+                        document.getElementById('continue-overlay').classList.add('hidden');
+                        startGameLoop();
+                    }, { once: true });
+
+                    document.getElementById('btn-continue-no').addEventListener('click', () => {
+                        localStorage.removeItem(SAVE_KEY);
+                        document.getElementById('continue-overlay').classList.add('hidden');
+                        startGameLoop();
+                    }, { once: true });
+                    return;
+                } catch (e) {
+                    localStorage.removeItem(SAVE_KEY);
+                }
+            }
+            startGameLoop();
+        };
+    </script>
+</body>
+</html>
