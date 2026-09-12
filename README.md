@@ -1,2 +1,2 @@
 # PowerGrid-Nexus
-A simple Power Plant Simulator
+A simple Power Plant Simulator built entirely in HTML and JavaScript!
